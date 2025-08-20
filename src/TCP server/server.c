@@ -2,25 +2,28 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <winsock2.h>
+#include <stdbool.h>
 
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
 SOCKET serverStartup();
 bool initializeWinsock ();
 struct addrinfo * initializeAddrInfo ();
 SOCKET createSocket(struct addrinfo* addr);
 
-void serverShutdown();
+void serverShutdown(SOCKET socketToClose);
 void closeSocket(SOCKET socketToClose);
-
+void serverTest (SOCKET serverSocket);
 
 
 int main (int argc, char *argv []) {
 	SOCKET serverSocket = serverStartup ();
 	
+	serverTest(serverSocket);
 	
-	
-	serverShutdown ();
+	serverShutdown (serverSocket);
 }
 
 SOCKET serverStartup() {
@@ -61,8 +64,11 @@ struct addrinfo * initializeAddrInfo () {
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = AI_PASSIVE;
+	
+	char * IPAddress = "127.0.0.1";
+	char * port = "8080";
 
-	int status = getaddrinfo(NULL, "8080", &hints, &result);
+	int status = getaddrinfo(IPAddress, port, &hints, &result);
 	if(status != 0) {
 		fprintf(stderr, "getaddrinfo failed: %s\n", gai_strerror(status));
 	}
@@ -79,14 +85,59 @@ SOCKET createSocket(struct addrinfo* addr) {
 		return INVALID_SOCKET;
 	}
 	
+	int bindResult = bind(newSocket, addr->ai_addr, (int)addr->ai_addrlen);
+	if (bindResult !=0) {
+		fprintf(stderr, "Socket Binding failed %d\n", WSAGetLastError());
+		closesocket(newSocket);
+		return INVALID_SOCKET;
+	}
+	int listenResult = listen(newSocket, SOMAXCONN);
+	if (listenResult == SOCKET_ERROR) {
+        fprintf(stderr,"Listen function failed with error: %d\n", WSAGetLastError());
+		closesocket(newSocket);
+		return INVALID_SOCKET;
+	}
+		
+	fprintf(stderr,"Socket creation success! Socket is now listening...\n");
 	
 	
 	return newSocket;
 }
 
+void serverTest(SOCKET serverSocket) {
+	char buffer[512];
+	int bytesReceived;
 
-void serverShutdown () {
-	closeSocket();
+	SOCKET clientSocket = accept(serverSocket, NULL, NULL);
+	if (clientSocket == INVALID_SOCKET) {
+		fprintf(stderr, "Accept failed: %d\n", WSAGetLastError());
+		closesocket(serverSocket);
+		return;
+	}
+
+	while (true) {
+		bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+		if (bytesReceived <= 0) {
+			break; // Connection closed or error
+		}
+
+		buffer[bytesReceived] = '\0';
+		printf("Client says: %s\n", buffer);
+
+		const char *response = "Message received!";
+		send(clientSocket, response, strlen(response), 0);
+	}
+	fprintf(stderr,"Press enter to close the server... \n");
+	getchar();
+}
+
+
+
+
+void serverShutdown (SOCKET socketToClose) {
+	if (socketToClose!= INVALID_SOCKET) {
+		closeSocket(socketToClose);
+	}
 	WSACleanup();
 }
 
