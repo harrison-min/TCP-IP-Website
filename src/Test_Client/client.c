@@ -14,6 +14,7 @@ struct addrinfo * initializeAddrInfo ();
 SOCKET createSocket(struct addrinfo* addr);
 
 void clientTest (SOCKET clientSocket);
+void twoWayCommunication (SOCKET clientSocket);
 
 void clientShutdown(SOCKET socketToClose);
 void closeSocket(SOCKET socketToClose);
@@ -68,8 +69,8 @@ struct addrinfo * initializeAddrInfo () {
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = 0;
 	
-	char * IPAddress = "127.0.0.1";
-	char * port = "8080";
+	char * IPAddress = "10.169.4.205";
+	char * port = "5000";
 
 	int status = getaddrinfo(IPAddress, port, &hints, &result);
 	if(status != 0) {
@@ -102,20 +103,39 @@ SOCKET createSocket(struct addrinfo* addr) {
 }
 
 void clientTest(SOCKET clientSocket) {
-	char buffer[512];
-	const char *message = "Hello from client!";
-	send(clientSocket, message, strlen(message), 0);
-
-	int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-	if (bytesReceived > 0) {
-		buffer[bytesReceived] = '\0';
-		printf("Server replied: %s\n", buffer);
-	}
 	
+	const char *openingMessage = "Hello from client!\n";
+	send(clientSocket, openingMessage, strlen(openingMessage), 0);
+	
+	twoWayCommunication(clientSocket);
 	
 	fprintf(stderr,"Press enter to close the client... \n");
 	getchar();
 	
+}
+
+void twoWayCommunication (SOCKET clientSocket) {
+	
+	int bufferSize = 512;
+	char buffer[bufferSize];
+
+	while (true) {
+		int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+		if (bytesReceived <= 0) {
+			break; // Connection closed or error
+		}
+
+		buffer[bytesReceived] = '\0';
+		printf("Server says: %s", buffer);
+
+		fprintf(stderr, "From Client: ");
+
+		char responseBuffer [bufferSize];
+		fgets (responseBuffer, bufferSize-1, stdin);
+		
+		
+		send(clientSocket, responseBuffer, strlen(responseBuffer), 0);
+	}
 }
 
 void clientShutdown (SOCKET socketToClose) {

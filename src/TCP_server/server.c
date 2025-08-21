@@ -11,7 +11,9 @@
 SOCKET serverStartup();
 bool initializeWinsock ();
 struct addrinfo * initializeAddrInfo ();
+
 SOCKET createSocket(struct addrinfo* addr);
+void twoWayCommunication (SOCKET clientSocket);
 
 void serverShutdown(SOCKET socketToClose);
 void closeSocket(SOCKET socketToClose);
@@ -65,8 +67,8 @@ struct addrinfo * initializeAddrInfo () {
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = AI_PASSIVE;
 	
-	char * IPAddress = "127.0.0.1";
-	char * port = "8080";
+	char * IPAddress = "10.169.4.205";
+	char * port = "5000";
 
 	int status = getaddrinfo(IPAddress, port, &hints, &result);
 	if(status != 0) {
@@ -105,30 +107,44 @@ SOCKET createSocket(struct addrinfo* addr) {
 }
 
 void serverTest(SOCKET serverSocket) {
-	char buffer[512];
-	int bytesReceived;
-
+	
 	SOCKET clientSocket = accept(serverSocket, NULL, NULL);
 	if (clientSocket == INVALID_SOCKET) {
 		fprintf(stderr, "Accept failed: %d\n", WSAGetLastError());
 		closesocket(serverSocket);
 		return;
 	}
+	
+	twoWayCommunication(clientSocket);
+	
+	
+	fprintf(stderr,"Press enter to close the server... \n");
+	getchar();
+}
+
+void twoWayCommunication (SOCKET clientSocket) {
+	int bufferSize = 512;
+	char buffer[bufferSize];
+	
+	int bytesReceived;
 
 	while (true) {
 		bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
 		if (bytesReceived <= 0) {
 			break; // Connection closed or error
 		}
-
 		buffer[bytesReceived] = '\0';
-		printf("Client says: %s\n", buffer);
+		printf("Client says: %s", buffer);
+		
+		fprintf(stderr, "From Server: ");
 
-		const char *response = "Message received!";
-		send(clientSocket, response, strlen(response), 0);
+		char responseBuffer [bufferSize];
+		fgets (responseBuffer, bufferSize-1, stdin);
+		
+		
+		send(clientSocket, responseBuffer, strlen(responseBuffer), 0);
 	}
-	fprintf(stderr,"Press enter to close the server... \n");
-	getchar();
+	
 }
 
 
