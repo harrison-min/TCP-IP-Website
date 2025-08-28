@@ -30,7 +30,7 @@ class TCPSocket {
         }
 };
 
-class TCPServerSocket : public TCPSocket {
+class TCPHostSocket : public TCPSocket {
     public:
         void set(addrinfo * info) {
             if (handle != INVALID_SOCKET) {
@@ -108,25 +108,54 @@ class AddrInfoInitializer {
         }
 };
 
-class TCPServer {
-    private:
+class TCPNode {
+    protected:
         std::string ipAddress;
         std::string port;
-        TCPServerSocket serverSocket;
+        AddrInfoInitializer info;
+
 
     public:
-        TCPServer(const std::string& IP, const std::string& portNumber)
-            : ipAddress(IP), port(portNumber) {
+        TCPNode(const std::string& IP, const std::string& portNumber)
+            : ipAddress(IP), port(portNumber), info(ipAddress, port) {}
 
-            AddrInfoInitializer info (ipAddress, port);
-            serverSocket.set(info.get());
+        virtual ~TCPNode() {}
+
+        void send (const std::string & message) {
 
         }
-        ~TCPServer() {
-            //shutdown server
+
+        std::string recieve () {
+
         }
 
 };
+
+class TCPHost : public TCPNode {
+    private:
+        TCPHostSocket hostSocket;
+
+    public:
+        TCPHost(const std::string& IP, const std::string& portNumber)
+            : TCPNode(IP, portNumber) {}
+        
+        void open () {
+            hostSocket.set(info.get());
+        }
+}
+
+class TCPClient: public TCPNode {
+    private: 
+        TCPclientSocket clientSocket;
+
+    public:
+        TCPClient(const std::string& IP, const std::string& portNumber)
+            : TCPNode(IP, portNumber) {}
+        void open () {
+            hostSocket.set(info.get());
+        }
+
+}
 
 class winsockInitializer {
     public:
@@ -153,7 +182,8 @@ int main () {
     std::string ip = "127.0.0.1";
     std::string port = "32796";
 
-    TCPServer myServer(ip, port);
+    TCPHost myServer(ip, port);
+    TCPClient myClient(ip, port);
 
 }
 
