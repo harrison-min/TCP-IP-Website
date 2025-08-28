@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build cpp",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++23",
+        "-Wall",
+        "-g",
+        "${workspaceFolder}/src/server.cpp",
+        "-o",
+        "${workspaceFolder}/bin/server.exe",
+        "-I", "C:/msys64/mingw64/include",
+        "-L", "C:/msys64/mingw64/lib",
+        "-lws2_32",
+        "-lcrypto",
+        "-lssl"
+      ],
+      "options": {
+        "shell": {
+          "executable": "cmd.exe",
+          "args": ["/d", "/c"]
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
