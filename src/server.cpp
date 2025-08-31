@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 // Windows Sockets
 #include <winsock2.h>
@@ -123,6 +124,14 @@ class TCPSocket {
         SOCKET getHandle() const{
             return handle;
         }
+
+        void setHandle(SOCKET newHandle) {
+            if (handle!=INVALID_SOCKET) {
+                closesocket(handle);
+            }
+
+            handle = newHandle;
+        }
 };
 
 class SSLSocket {
@@ -146,6 +155,27 @@ class SSLSocket {
                 sslContext = SSL_CTX_new(method);
                 if (sslContext == nullptr) {
                     throw std::runtime_error("Failed to create SSL Context");
+                }
+
+                SSL_CTX_set_cipher_list(sslContext, "HIGH:!aNULL:!MD5");
+
+                if (socketType == HOST) {
+                    if (SSL_CTX_use_certificate_file(sslContext, "../certs/server.crt", SSL_FILETYPE_PEM) <= 0) {
+                        throw std::runtime_error("Failed to load server certificate");
+                    }
+
+                    if (SSL_CTX_use_PrivateKey_file(sslContext, "../certs/server.key", SSL_FILETYPE_PEM) <= 0) {
+                        throw std::runtime_error("Failed to load server private key");
+                    }
+
+                    if (!SSL_CTX_check_private_key(sslContext)) {
+                        throw std::runtime_error("Server certificate and private key do not match");
+                    }
+                }
+
+                if (socketType == CLIENT){
+                    SSL_CTX_set_verify(sslContext, SSL_VERIFY_PEER, nullptr);
+                    SSL_CTX_load_verify_locations(sslContext, "path/to/ca.crt", nullptr);
                 }
 
                 sslStructure = SSL_new(sslContext);
@@ -175,7 +205,7 @@ class SSLSocket {
         SSLSocket& operator=(const SSLSocket&) = delete;
 
         void handshake () {
-            int result;
+            int result = 0;
             if (socketType == CLIENT) {
                 result = SSL_connect(sslStructure);
             } else {
@@ -222,9 +252,28 @@ class TCPHostSocket {
             std::cerr<<"Server socket creation success! Socket is now listening...\n";
         }
 
+        std::unique_ptr<TCPSocket> accept() {
+            sockaddr_storage clientAddr;
+            int clientAddrLen = sizeof(clientAddr);
+
+            SOCKET clientSocket = ::accept(socket.getHandle(), (sockaddr*)&clientAddr, &clientAddrLen);
+            if (clientSocket == INVALID_SOCKET) {
+                throw std::runtime_error("Accept failed\nWSAGetLastError: " + std::to_string(WSAGetLastError()));
+            }
+
+            auto acceptedSocket = std::make_unique<TCPSocket>();
+            acceptedSocket->setHandle(clientSocket);
+
+            std::cerr<<"Connection accepted!\n";
+
+            return acceptedSocket;
+        }
+
         void change(AddrInfoInitializer newInfo) {
             info = newInfo.getAddrInfo();
         }
+
+        
 
         TCPSocket& getSocket() {
             return socket;
@@ -283,9 +332,20 @@ int main () {
     myClient.create();
     myClient.connect();
 
+    auto acceptedSocket = myHost.accept();
+
     SSLSocket sslClient (myClient.getSocket(), CLIENT);
-    SSLSocket sslHost (myHost.getSocket(), HOST);
+    SSLSocket sslHost (*acceptedSocket, HOST);
 
     
-    sslClient.handshake();
+    std::thread serverThread([&sslHost]{
+        sslHost.handshake();
+    });
+        
+    std::thread clientThread([&sslClient]{
+        sslClient.handshake();
+    });
+    
+    serverThread.join();
+    clientThread.join();
 }
