@@ -175,7 +175,7 @@ class SSLSocket {
 
                 if (socketType == CLIENT){
                     SSL_CTX_set_verify(sslContext, SSL_VERIFY_PEER, nullptr);
-                    SSL_CTX_load_verify_locations(sslContext, "path/to/ca.crt", nullptr);
+                    SSL_CTX_load_verify_locations(sslContext, "../certs/server.crt", nullptr);
                 }
 
                 sslStructure = SSL_new(sslContext);
@@ -218,6 +218,30 @@ class SSLSocket {
 
             std::cerr<<"SSL handshake successful!\n";
         }
+
+        std::string read() {
+            const int bufferSize = 4096;
+
+            std::vector<char> buffer(bufferSize);
+
+            int readResult = SSL_read(sslStructure, buffer.data(), bufferSize);
+
+            if (readResult <=0) {
+                throw std::runtime_error("SSL_read failed with error code: " + std::to_string(SSL_get_error(sslStructure, readResult)));
+            }
+
+            return std::string(buffer.begin(),buffer.begin() + readResult);
+
+        }
+
+        void write (const std::string & message) {
+            int writeResult = SSL_write(sslStructure, message.data(), static_cast<int>(message.size()));
+             
+            if (writeResult <= 0) {
+                throw std::runtime_error("SSL_write failed with error code: " +std::to_string(SSL_get_error(sslStructure, writeResult)));
+            }
+        }
+
 };
 
 
@@ -312,10 +336,7 @@ class TCPClientSocket {
         }
 };
 
-int main () {
-    WinsockInitializer winsock;
-    OpenSSLInitializer openssl;
-
+void multiThreadTest() {
     std::string ip = "127.0.0.1";
     std::string port = "32796";
 
@@ -323,29 +344,70 @@ int main () {
     AddrInfoInitializer clientInfo (ip, port, CLIENT);
 
     TCPHostSocket myHost (hostInfo);
-    TCPClientSocket myClient (clientInfo);
 
     myHost.create();
     myHost.bind();
     myHost.listen();
-    
-    myClient.create();
-    myClient.connect();
 
-    auto acceptedSocket = myHost.accept();
+    const int totalClients = 10;
+    std::vector<std::thread> serverThreads;
+    std::vector<std::thread> clientThreads;
 
-    SSLSocket sslClient (myClient.getSocket(), CLIENT);
-    SSLSocket sslHost (*acceptedSocket, HOST);
+    std::thread acceptThread([&] {
+        for (size_t i = 0; i < totalClients; i ++) {
+            auto acceptedClient = myHost.accept();
+            serverThreads.emplace_back([socket = std::move(acceptedClient), i] {
+                try {
+                    SSLSocket ssl (*socket, HOST);
+                    ssl.handshake();
 
-    
-    std::thread serverThread([&sslHost]{
-        sslHost.handshake();
+                    for (int msg = 0; msg < 3; msg ++) { 
+                        std::string message = ssl.read();
+                        std::cerr << "Server received from client " << i << ": " << message << std::endl;
+                    }
+
+                }catch (std::exception &ex) {
+                    std::cerr << "ServerSide Client " << i << " Thread error: " << ex.what() << std::endl;
+                }
+            });
+
+        }
     });
-        
-    std::thread clientThread([&sslClient]{
-        sslClient.handshake();
-    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    for (size_t i = 0; i < totalClients; i ++) {
+        clientThreads.emplace_back([i, &clientInfo] {
+            try {
+                TCPClientSocket myClient(clientInfo);
+                myClient.create();
+                myClient.connect();
+                SSLSocket ssl (myClient.getSocket(), CLIENT);
+                ssl.handshake();
+
+                for (int msg = 0; msg < 3; msg ++) { 
+                    ssl.write("Hello from Client " + std::to_string(i));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                }
+
+            }catch (std::exception &ex) {
+                std::cerr << "Created Client " << i << " Thread error: " << ex.what() << std::endl;
+            }
+        });
+    }
+
+    acceptThread.join();
+
+    for (auto& t : serverThreads) t.join();
+    for (auto& t : clientThreads) t.join();
+
     
-    serverThread.join();
-    clientThread.join();
+}
+
+
+int main () {
+    WinsockInitializer winsock;
+    OpenSSLInitializer openssl;
+
+    multiThreadTest();
 }
