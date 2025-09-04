@@ -349,7 +349,7 @@ void multiThreadTest() {
     myHost.bind();
     myHost.listen();
 
-    const int totalClients = 10;
+    const int totalClients = 50;
     std::vector<std::thread> serverThreads;
     std::vector<std::thread> clientThreads;
 
