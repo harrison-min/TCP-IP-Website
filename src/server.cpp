@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <fstream>
 
 // Windows Sockets
 #include <winsock2.h>
@@ -12,6 +13,8 @@
 //openssl
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
 
 enum SocketRole{
     HOST,
@@ -141,7 +144,6 @@ class SSLSocket {
         TCPSocket& tcpSocket;
         SocketRole socketType;
 
-
     public:
         SSLSocket(TCPSocket& incomingSocket, SocketRole declaredType) 
             :sslContext(nullptr), sslStructure(nullptr), tcpSocket(incomingSocket), socketType(declaredType) {
@@ -172,7 +174,7 @@ class SSLSocket {
                         throw std::runtime_error("Server certificate and private key do not match");
                     }
                 }
-
+                
                 if (socketType == CLIENT){
                     SSL_CTX_set_verify(sslContext, SSL_VERIFY_PEER, nullptr);
                     SSL_CTX_load_verify_locations(sslContext, "../certs/server.crt", nullptr);
@@ -242,8 +244,86 @@ class SSLSocket {
             }
         }
 
-};
+        void addCredentials () {
+            std::cout << "Please input in password: ";
 
+            std::string password;
+            std::cin>> password;
+
+            std::vector<unsigned char> salt (16,0);
+            if (!RAND_bytes(salt.data(), salt.size()) ) {
+                std::cerr << "RAND_bytes failed";
+            };
+
+            std::vector<unsigned char> key (64,0);
+
+            int cpuCost = 512;
+            int blockSize = 8;
+            int parallels = 1;
+            unsigned long maxMemory = 32 * 1024 * 1024; 
+
+            if (!EVP_PBE_scrypt(password.c_str(), password.size(), salt.data(), salt.size(), cpuCost, blockSize, parallels, maxMemory,key.data(), key.size()) ) {
+                throw std::runtime_error ("Scrypt generation failed");
+            }; 
+
+            std::ofstream file ("../certs/password.txt", std::ios::binary);
+
+            if (!file) {
+                throw std::runtime_error("Password file did not open");
+            }
+            file.write(reinterpret_cast<char*>(salt.data()), salt.size());
+            file.write(reinterpret_cast<char*>(key.data()), key.size());
+        }
+
+        void sendCredentials () {
+            std::cout << "Please input in password: ";
+
+            std::string password;
+            std::cin>> password;
+
+            this->write(password);
+        }
+
+        bool checkCredentials() {
+            std::string presentedCredentials = this->read();
+
+            std::cerr << "Received password \"" + presentedCredentials + "\"\n";
+
+            std::ifstream file ("../certs/password.txt", std::ios::binary);
+
+            if (!file) {
+                throw std::runtime_error("Password file did not open");
+            }
+
+            std::vector<unsigned char> salt (16,0);
+            std::vector<unsigned char> storedKey (64,0);
+            
+            file.read(reinterpret_cast<char*>(salt.data()), salt.size());
+            file.read(reinterpret_cast<char*>(storedKey.data()), storedKey.size());
+
+            std::vector<unsigned char> derivedKey (64,0);
+
+            int cpuCost = 512;
+            int blockSize = 8;
+            int parallels = 1;
+            unsigned long maxMemory = 32 * 1024 * 1024; 
+
+            if (!EVP_PBE_scrypt(presentedCredentials.c_str(), presentedCredentials.size(), salt.data(), salt.size(), cpuCost, blockSize, parallels, maxMemory,derivedKey.data(), derivedKey.size()) ) {
+                throw std::runtime_error ("Scrypt generation failed");
+            }; 
+
+            for (size_t i = 0; i < derivedKey.size(); i ++) { 
+                if (storedKey[i] != derivedKey[i]) {
+                    return false;
+                }
+            }
+
+
+            return true;
+
+
+        }
+};
 
 class TCPHostSocket {
     private:
@@ -296,8 +376,6 @@ class TCPHostSocket {
         void change(AddrInfoInitializer newInfo) {
             info = newInfo.getAddrInfo();
         }
-
-        
 
         TCPSocket& getSocket() {
             return socket;
@@ -366,7 +444,7 @@ void multiThreadTest() {
                         std::cerr << "Server received from client " << i << ": " << message << std::endl;
                     }
 
-                }catch (std::exception &ex) {
+                } catch (std::exception &ex) {
                     std::cerr << "ServerSide Client " << i << " Thread error: " << ex.what() << std::endl;
                 }
             });
@@ -404,10 +482,50 @@ void multiThreadTest() {
     
 }
 
-
 int main () {
     WinsockInitializer winsock;
     OpenSSLInitializer openssl;
 
-    multiThreadTest();
+
+    std::string ipAddress = "127.0.0.1";
+    std::string port = "12345";
+
+    AddrInfoInitializer hostInfo = AddrInfoInitializer(ipAddress, port, HOST);
+    AddrInfoInitializer clientInfo = AddrInfoInitializer(ipAddress, port, CLIENT);
+
+    TCPHostSocket myHost (hostInfo);
+    TCPClientSocket myClient (clientInfo);
+
+    myHost.create();
+    myHost.bind();
+    myHost.listen();
+
+    myClient.create();
+    myClient.connect();
+
+    auto acceptedConnection = myHost.accept();
+
+    SSLSocket host(*acceptedConnection, HOST);
+    SSLSocket client(myClient.getSocket(), CLIENT);
+
+    std::thread hostThread( [&] {
+        host.handshake();
+
+        if (host.checkCredentials()) {
+            std::cerr<< "Check success!\n";
+        } else {
+            std::cerr<< "Check failure\n";
+        }
+    });  
+    
+    
+    std::thread clientThread ([&] {
+        client.handshake();
+
+        client.sendCredentials();
+    });
+
+
+    hostThread.join();
+    clientThread.join();
 }
